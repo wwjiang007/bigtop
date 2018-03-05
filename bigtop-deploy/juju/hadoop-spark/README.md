@@ -23,16 +23,16 @@ using a simple programming model.
 Hadoop is designed to scale from a few servers to thousands of machines,
 each offering local computation and storage. Rather than rely on hardware
 to deliver high-availability, Hadoop can detect and handle failures at the
-application layer. This provides a highly-available service on top of a cluster
-of machines, each of which may be prone to failure.
+application layer. This provides a highly-available service on top of a
+cluster of machines, each of which may be prone to failure.
 
 Apache Spark is a fast and general engine for large-scale data processing.
 Learn more at [spark.apache.org][].
 
-This bundle provides a complete deployment of Hadoop and Spark components from
-[Apache Bigtop][] that performs distributed data processing at scale. Ganglia
-and rsyslog applications are also provided to monitor cluster health and syslog
-activity.
+This bundle provides a complete deployment of Hadoop and Spark components
+from [Apache Bigtop][] that performs distributed data processing at scale.
+Ganglia and rsyslog applications are also provided to monitor cluster health
+and syslog activity.
 
 [spark.apache.org]: http://spark.apache.org/
 [Apache Bigtop]: http://bigtop.apache.org/
@@ -146,7 +146,7 @@ of YARN NodeManager units with the following:
     juju run --application namenode "su hdfs -c 'hdfs dfsadmin -report'"
     juju run --application resourcemanager "su yarn -c 'yarn node -list'"
 
-To access the HDFS web console, find the `PUBLIC-ADDRESS` of the namenode
+To access the HDFS web console, find the `Public address` of the namenode
 application and expose it:
 
     juju status namenode
@@ -157,7 +157,7 @@ The web interface will be available at the following URL:
     http://NAMENODE_PUBLIC_IP:50070
 
 Similarly, to access the Resource Manager web consoles, find the
-`PUBLIC-ADDRESS` of the resourcemanager application and expose it:
+`Public address` of the resourcemanager application and expose it:
 
     juju status resourcemanager
     juju expose resourcemanager
@@ -167,7 +167,7 @@ The YARN and Job History web interfaces will be available at the following URLs:
     http://RESOURCEMANAGER_PUBLIC_IP:8088
     http://RESOURCEMANAGER_PUBLIC_IP:19888
 
-Finally, to access the Spark web console, find the `PUBLIC-ADDRESS` of the
+Finally, to access the Spark web console, find the `Public address` of the
 spark application and expose it:
 
     juju status spark
@@ -181,9 +181,9 @@ The web interface will be available at the following URL:
 # Monitoring
 
 This bundle includes Ganglia for system-level monitoring of the namenode,
-resourcemanager, slave, and spark units. Metrics are sent to a
-centralized ganglia unit for easy viewing in a browser. To view the ganglia web
-interface, find the `PUBLIC-ADDRESS` of the Ganglia application and expose it:
+resourcemanager, and slave units. Metrics are sent to a centralized ganglia
+unit for easy viewing in a browser. To view the ganglia web interface, find
+the `Public address` of the Ganglia application and expose it:
 
     juju status ganglia
     juju expose ganglia
