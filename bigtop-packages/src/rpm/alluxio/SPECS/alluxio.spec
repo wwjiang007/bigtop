@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+%define        alluxio_name alluxio
 
 Name:           alluxio
 Version:        %{alluxio_version}
@@ -28,7 +29,7 @@ Source2:       install_alluxio.sh
 Source3:       init.d.tmpl
 Source4:       alluxio-master.svc
 Source5:       alluxio-worker.svc
-%define        alluxio_name alluxio
+#BIGTOP_PATCH_FILES
 %define        alluxio_home /usr/lib/%{alluxio_name}
 %define        alluxio_services master worker
 %define        var_lib /var/lib/%{alluxio_name}
@@ -53,6 +54,7 @@ Requires: insserv
 %else
 # Required for init scripts
 Requires: /lib/lsb/init-functions
+Requires: initscripts
 
 %global        initd_dir %{_sysconfdir}/rc.d/init.d
 
@@ -77,6 +79,8 @@ are frequently read.
 
 %prep
 %setup -n %{alluxio_name}-%{alluxio_base_version}
+
+#BIGTOP_PATCH_COMMANDS
 
 %build
 bash $RPM_SOURCE_DIR/do-component-build
@@ -125,20 +129,19 @@ done
 %defattr(-,root,root,-)
 %doc LICENSE README.md
 %dir %{_sysconfdir}/%{alluxio_name}
-%config(noreplace) %{_sysconfdir}/%{alluxio_name}/conf/log4j.properties
+%config(noreplace) %{_sysconfdir}/%{alluxio_name}/conf.dist
+%config(noreplace) %{_sysconfdir}/%{alluxio_name}/conf.dist/log4j.properties
+%config(noreplace) %{_sysconfdir}/%{alluxio_name}/conf.dist/alluxio-env.sh
+%config(noreplace) %{_sysconfdir}/%{alluxio_name}/conf.dist/alluxio-site.properties
+%config(noreplace) %{_sysconfdir}/%{alluxio_name}/conf.dist/core-site.xml
 %config(noreplace) %{initd_dir}/%{alluxio_name}-master
 %config(noreplace) %{initd_dir}/%{alluxio_name}-worker
-%config(noreplace) %{_sysconfdir}/%{alluxio_name}/conf/alluxio-env.sh
-%config(noreplace) %{alluxio_home}/libexec/alluxio-layout.sh
 %attr(0755,alluxio,alluxio) %{var_lib}
 %attr(0755,alluxio,alluxio) %{var_run}
 %attr(0755,alluxio,alluxio) %{var_log}
-%{alluxio_home}/alluxio*
-%{alluxio_home}/bin/alluxio*
-%{alluxio_home}/libexec/alluxio*
+%{alluxio_home}
 %{_datadir}/%{alluxio_name}
 /usr/bin/alluxio
-%{alluxio_home}/share
 
 
 %clean

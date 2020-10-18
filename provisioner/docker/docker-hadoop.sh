@@ -16,18 +16,33 @@
 # limitations under the License.
 
 usage() {
-    echo "usage: $PROG [-C file ] args"
-    echo "       -C file                                   Use alternate file for config.yaml"
+    echo "usage: $PROG [-C file] args"
+    echo "       -C file                                   - Use alternate file for config.yaml"
     echo "  commands:"
-    echo "       -c NUM_INSTANCES, --create NUM_INSTANCES  Create a Docker based Bigtop Hadoop cluster"
-    echo "       -d, --destroy                             Destroy the cluster"
-    echo "       -e, --exec INSTANCE_NO|INSTANCE_NAME      Execute command on a specific instance. Instance can be specified by name or number."
-    echo "                                                 For example: $PROG --exec 1 bash"
-    echo "                                                              $PROG --exec docker_bigtop_1 bash"
-    echo "       -E, --env-check                           Check whether required tools has been installed"
-    echo "       -l, --list                                List out container status for the cluster"
-    echo "       -p, --provision                           Deploy configuration changes"
-    echo "       -s, --smoke-tests                         Run Bigtop smoke tests"
+    echo "       -c NUM_INSTANCES, --create NUM_INSTANCES  - Create a Docker based Bigtop Hadoop cluster"
+    echo "       -d, --destroy                             - Destroy the cluster"
+    echo "       -e, --exec INSTANCE_NO|INSTANCE_NAME      - Execute command on a specific instance. Instance can be specified by name or number"
+    echo "                                                   For example: $PROG --exec 1 bash"
+    echo "                                                                $PROG --exec docker_bigtop_1 bash"
+    echo "       -E, --env-check                           - Check whether required tools has been installed"
+    echo "       -G, --disable-gpg-check                   - Disable gpg check for the Bigtop repository"
+    echo "       -k, --stack COMPONENTS                    - Overwrite the components to deploy defined in config file"
+    echo "                                                   COMPONENTS is a comma separated string"
+    echo "                                                   For example: $PROG -c 3 --stack hdfs"
+    echo "                                                                $PROG -c 3 --stack 'hdfs, yarn, spark'"
+    echo "       -l, --list                                - List out container status for the cluster"
+    echo "       -L, --enable-local-repo                   - Whether to use repo created at local file system. You can get one by $ ./gradlew repo"
+    echo "       -m, --memory MEMORY_LIMIT                 - Overwrite the memory_limit defined in config file"
+    echo "       -n, --nexus NEXUS_URL                     - Configure Nexus proxy to speed up test execution"
+    echo "                                                   NEXUS_URL is optional. If not specified, default to http://NEXUS_IP:8081/nexus"
+    echo "                                                   Where NEXUS_IP is the ip of container named nexus"
+    echo "       -p, --provision                           - Deploy configuration changes"
+    echo "       -r, --repo REPO_URL                       - Overwrite the yum/apt repo defined in config file"
+    echo "       -s, --smoke-tests COMPONENTS              - Run Bigtop smoke tests"
+    echo "                                                   COMPONENTS is optional. If not specified, default to smoke_test_components in config file"
+    echo "                                                   COMPONENTS is a comma separated string"
+    echo "                                                   For example: $PROG -c 3 --smoke-tests hdfs"
+    echo "                                                                $PROG -c 3 --smoke-tests 'hdfs, yarn, mapreduce'"
     echo "       -h, --help"
     exit 1
 }
@@ -43,25 +58,64 @@ create() {
     mkdir -p config/hieradata 2> /dev/null
     echo > ./config/hiera.yaml
     echo > ./config/hosts
-    export DOCKER_IMAGE=$(get-yaml-config docker image)
-    export MEM_LIMIT=$(get-yaml-config docker memory_limit)
+    # set correct image name based on running architecture
+    if [ -z ${image_name+x} ]; then
+        image_name=$(get-yaml-config docker image)
+    fi
+    running_arch=$(uname -m)
+    if [ "x86_64" == ${running_arch} ]; then
+        image_name=${image_name}
+    else
+        image_name=${image_name}-${running_arch}
+    fi
+    export DOCKER_IMAGE=${image_name}
+
+    if [ -z ${memory_limit+x} ]; then
+        memory_limit=$(get-yaml-config docker memory_limit)
+    fi
+    export MEM_LIMIT=${memory_limit}
 
     # Startup instances
-    docker-compose -p $PROVISION_ID scale bigtop=$1
+    docker-compose -p $PROVISION_ID up -d --scale bigtop=$1 --no-recreate
     if [ $? -ne 0 ]; then
         log "Docker container(s) startup failed!";
         exit 1;
     fi
 
     # Get the headnode FQDN
+    # shellcheck disable=SC2207
     NODES=(`docker-compose -p $PROVISION_ID ps -q`)
+    # shellcheck disable=SC1083
     hadoop_head_node=`docker inspect --format {{.Config.Hostname}}.{{.Config.Domainname}} ${NODES[0]}`
 
     # Fetch configurations form specificed yaml config file
-    repo=$(get-yaml-config repo)
-    components="[`echo $(get-yaml-config components) | sed 's/ /, /g'`]"
-    distro=$(get-yaml-config distro)
-    enable_local_repo=$(get-yaml-config enable_local_repo)
+    if [ -z ${repo+x} ]; then
+        repo=$(get-yaml-config repo)
+    fi
+    if [ -z ${components+x} ]; then
+        components="[`echo $(get-yaml-config components) | sed 's/ /, /g'`]"
+    fi
+    if [ -z ${distro+x} ]; then
+        distro=$(get-yaml-config distro)
+    fi
+    if [ -z ${enable_local_repo+x} ]; then
+        enable_local_repo=$(get-yaml-config enable_local_repo)
+    fi
+    if [ -z ${gpg_check+x} ]; then
+        disable_gpg_check=$(get-yaml-config disable_gpg_check)
+        if [ -z "${disable_gpg_check}" ]; then
+            if [ "${enable_local_repo}" = true ]; then
+                # When enabling local repo, set gpg check to false
+                gpg_check=false
+            else
+                gpg_check=true
+            fi
+        elif [ "${disable_gpg_check}" = true ]; then
+            gpg_check=false
+        else
+            gpg_check=true
+        fi
+    fi
     generate-config "$hadoop_head_node" "$repo" "$components"
 
     # Start provisioning
@@ -82,13 +136,21 @@ generate-hosts() {
 
 generate-config() {
     log "Bigtop Puppet configurations are shared between instances, and can be modified under config/hieradata"
+    # add ip of all nodes to config
+    for node in ${NODES[*]}; do
+        this_node_ip=`docker inspect --format "{{.NetworkSettings.IPAddress}}" $node`
+	node_list="$node_list$this_node_ip "
+    done
+    node_list=$(echo "$node_list" | xargs | sed 's/ /, /g')
     cat $BIGTOP_PUPPET_DIR/hiera.yaml >> ./config/hiera.yaml
     cp -vfr $BIGTOP_PUPPET_DIR/hieradata ./config/
     cat > ./config/hieradata/site.yaml << EOF
 bigtop::hadoop_head_node: $1
 hadoop::hadoop_storage_dirs: [/data/1, /data/2]
 bigtop::bigtop_repo_uri: $2
+bigtop::bigtop_repo_gpg_check: $gpg_check
 hadoop_cluster_node::cluster_components: $3
+hadoop_cluster_node::cluster_nodes: [$node_list]
 EOF
 }
 
@@ -107,32 +169,52 @@ bootstrap() {
 }
 
 provision() {
+    rm -f .error_msg_*
     for node in ${NODES[*]}; do
-        bigtop-puppet $node &
+        (
+        bigtop-puppet $node
+        result=$?
+        # 0: The run succeeded with no changes or failures; the system was already in the desired state.
+        # 1: The run failed, or wasn't attempted due to another run already in progress.
+        # 2: The run succeeded, and some resources were changed.
+        # 4: The run succeeded, and some resources failed.
+        # 6: The run succeeded, and included both changes and failures.
+        if [ $result != 0 ] && [ $result != 2 ]; then
+            log "Failed to provision container $node with exit code $result" > .error_msg_$node
+        fi
+        ) &
     done
     wait
+    cat .error_msg_* 2>/dev/null && exit 1
 }
 
 smoke-tests() {
     hadoop_head_node=${NODES:0:12}
-    smoke_test_components="`echo $(get-yaml-config smoke_test_components) | sed 's/ /,/g'`"
+    if [ -z ${smoke_test_components+x} ]; then
+        smoke_test_components="`echo $(get-yaml-config smoke_test_components) | sed 's/ /,/g'`"
+    fi
     docker exec $hadoop_head_node bash -c "bash -x /bigtop-home/provisioner/utils/smoke-tests.sh $smoke_test_components"
 }
 
 destroy() {
-    docker exec ${NODES[0]} bash -c "umount /etc/hosts; rm -f /etc/hosts"
-    if [ -n "$PROVISION_ID" ]; then
-        docker-compose -p $PROVISION_ID stop
-        docker-compose -p $PROVISION_ID rm -f
+    if [ -z ${PROVISION_ID+x} ]; then
+        echo "No cluster exists!"
+    else
+        docker exec ${NODES[0]} bash -c "umount /etc/hosts; rm -f /etc/hosts"
+        if [ -n "$PROVISION_ID" ]; then
+            docker-compose -p $PROVISION_ID stop
+            docker-compose -p $PROVISION_ID rm -f
+        fi
+        rm -rvf ./config .provision_id .error_msg*
     fi
-    rm -rvf ./config .provision_id
 }
 
 bigtop-puppet() {
     if docker exec $1 bash -c "puppet --version" | grep ^3 >/dev/null ; then
       future="--parser future"
     fi
-    docker exec $1 bash -c "puppet apply $future --modulepath=/bigtop-home/bigtop-deploy/puppet/modules:/etc/puppet/modules:/usr/share/puppet/modules /bigtop-home/bigtop-deploy/puppet/manifests"
+    # BIGTOP-3401 Modify Puppet modulepath for puppetlabs-4.12
+    docker exec $1 bash -c "puppet apply --detailed-exitcodes $future --hiera_config=/etc/puppet/hiera.yaml --modulepath=/bigtop-home/bigtop-deploy/puppet/modules:/etc/puppet/modules:/usr/share/puppet/modules:/etc/puppetlabs/code/modules /bigtop-home/bigtop-deploy/puppet/manifests"
 }
 
 get-yaml-config() {
@@ -153,11 +235,11 @@ execute() {
     if [[ $1 =~ $re ]] ; then
         no=$1
         shift
-        docker exec -ti ${NODES[$((no-1))]} $@
+        docker exec -ti ${NODES[$((no-1))]} "$@"
     else
         name=$1
         shift
-        docker exec -ti $name $@
+        docker exec -ti $name "$@"
     fi
 }
 
@@ -184,6 +266,14 @@ log() {
     echo -e "\n[LOG] $1\n"
 }
 
+configure-nexus() {
+    for node in ${NODES[*]}; do
+        docker exec $node bash -c "cd /bigtop-home; ./gradlew -PNEXUS_URL=$1 configure-nexus"
+    done
+    wait
+}
+
+
 PROG=`basename $0`
 
 if [ $# -eq 0 ]; then
@@ -197,6 +287,7 @@ if [ -e .provision_id ]; then
     PROVISION_ID=`cat .provision_id`
 fi
 if [ -n "$PROVISION_ID" ]; then
+    # shellcheck disable=SC2207
     NODES=(`docker-compose -p $PROVISION_ID ps -q`)
 fi
 
@@ -208,14 +299,15 @@ while [ $# -gt 0 ]; do
           usage
         fi
         env-check
-        create $2
+        READY_TO_LAUNCH=true
+        NUM_INSTANCES=$2
         shift 2;;
     -C|--conf)
         if [ $# -lt 2 ]; then
           echo "Alternative config file for config.yaml" 1>&2
           usage
         fi
-	yamlconf=$2
+	    yamlconf=$2
         shift 2;;
     -d|--destroy)
         destroy
@@ -226,20 +318,87 @@ while [ $# -gt 0 ]; do
           usage
         fi
         shift
-        execute $@
+        execute "$@"
         shift $#;;
     -E|--env-check)
         env-check
         shift;;
+    -G|--disable-gpg-check)
+        gpg_check=false
+        shift;;
+    -k|--stack)
+        if [ $# -lt 2 ]; then
+          log "No stack specified"
+          usage
+        fi
+        components="[$2]"
+        shift 2;;
+    -i|--image)
+        if [ $# -lt 2 ]; then
+          log "No image specified"
+          usage
+        fi
+        image_name=$2
+        # Determine distro to bootstrap provisioning environment
+        case "${image_name}" in
+          *-centos-*|*-fedora-*|*-opensuse-*)
+            distro=centos
+            ;;
+          *-debian-*|*-ubuntu-*)
+            distro=debian
+            ;;
+          *)
+            echo "Unsupported distro [${image_name}]"
+            exit 1
+            ;;
+        esac
+        shift 2;;
     -l|--list)
         list
         shift;;
+    -L|--enable-local-repo)
+        enable_local_repo=true
+        shift;;
+    -m|--memory)
+        if [ $# -lt 2 ]; then
+          log "No memory specified. Try --memory 4g"
+          usage
+        fi
+        memory_limit=$2
+        shift 2;;
+    -n|--nexus)
+        if [ $# -lt 2 ] || [[ $2 == -* ]]; then
+            NEXUS_IP=`docker inspect --format "{{.NetworkSettings.IPAddress}}" nexus`
+            if [ $? != 0 ]; then
+                log "No container named nexus exists. To create one:\n $ docker run -d --name nexus sonatype/nexus"
+                exit 1
+            fi
+            configure-nexus "http://$NEXUS_IP:8081/nexus"
+            shift
+        else
+            configure-nexus $2
+            shift 2
+        fi
+        ;;
     -p|--provision)
         provision
         shift;;
+    -r|--repo)
+        if [ $# -lt 2 ]; then
+          log "No yum/apt repo specified"
+          usage
+        fi
+        repo=$2
+        shift 2;;
     -s|--smoke-tests)
-        smoke-tests
-        shift;;
+        if [ $# -lt 2 ] || [[ $2 == -* ]]; then
+            shift
+        else
+            smoke_test_components=$2
+            shift 2
+        fi
+        READY_TO_TEST=true
+        ;;
     -h|--help)
         usage
         shift;;
@@ -248,3 +407,10 @@ while [ $# -gt 0 ]; do
         usage;;
     esac
 done
+
+if [ "$READY_TO_LAUNCH" = true ]; then
+    create $NUM_INSTANCES
+fi
+if [ "$READY_TO_TEST" = true ]; then
+    smoke-tests
+fi

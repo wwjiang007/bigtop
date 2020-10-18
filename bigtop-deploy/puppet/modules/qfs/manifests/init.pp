@@ -40,6 +40,11 @@ class qfs {
       group => root,
       mode => '0755',
     }
+
+    file { "/etc/qfs":
+      ensure => directory,
+      mode => '0755',
+    }
   }
 
   class metaserver {
@@ -74,6 +79,8 @@ class qfs {
     exec { "mkfs":
       command => "/usr/bin/metaserver -c $metaserver_conf",
       creates => "${qfs::common::storage_dirs[0]}/metaserver/checkpoint/latest",
+      # BIGTOP-3126: qfs init script requires to run under a permitted directory
+      cwd => "/tmp",
       user => qfs,
       group => qfs,
       require => [
@@ -107,7 +114,7 @@ class qfs {
     $chunkserver_conf = "/etc/qfs/ChunkServer.prp"
     file { $chunkserver_conf:
       content => template("qfs/ChunkServer.prp"),
-      require => Package["qfs-chunkserver"],
+      require => [Package["qfs-chunkserver"], File["/etc/qfs"]],
     }
 
     $cs_dirs = suffix($hadoop::hadoop_storage_dirs, "/qfs/chunkserver")
@@ -150,12 +157,20 @@ class qfs {
 
     file { "/etc/qfs/QfsClient.prp":
       content => template("qfs/QfsClient.prp"),
-      require => Package["qfs-client"],
+      require => [Package["qfs-client"], File["/etc/qfs"]],
     }
 
     file { "/usr/bin/hadoop-qfs":
       content => template("qfs/hadoop-qfs"),
       mode => '0755',
+    }
+
+    # Add QFS native lib into Hadoop native lib dir
+    exec { "add_qfs_native_lib":
+      path    => ['/bin','/sbin','/usr/bin','/usr/sbin'],
+      command => 'find /usr/lib/qfs/ -name "lib*" -exec ln -s {} /usr/lib/hadoop/lib/native \;',
+      require => Package["qfs-client"],
+      notify => [ Service["hadoop-yarn-nodemanager"] ],
     }
   }
 }

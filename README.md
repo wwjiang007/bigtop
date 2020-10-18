@@ -59,30 +59,6 @@ There are lots of ways to contribute.  People with different expertise can help 
 
 Also, opening [JIRA's](https://issues.apache.org/jira/browse/BIGTOP) and getting started by posting on the mailing list is helpful.
 
-CTR model
-=========
-
-Bigtop supports Commit-Then-Review model of development. The following
-rules will be used for the CTR process:
-  * a committer can go ahead and commit the patch without mandatory review if
-    felt confident in its quality (e.g. reasonable testing has been done
-    locally; all compilations pass; RAT check is passed; the patch follows
-    coding guidelines)
-  * a committer is encouraged to seek peer-review and/or advice before hand if
-    there're doubts in the approach taken, design decision, or implementation
-    details
-  * a committer should keep an eye on the official CI builds at
-    https://ci.bigtop.apache.org/view/Packages/job/Bigtop-trunk-packages/ (Bigtop-trunk-packages builds)
-    to make sure that committed changes haven't break anything. In
-    which case the committer should take a timely effort to resolve the issues
-    and unblock the others in the community
-  * any non-document patch is required to be opened for at least 24 hours for
-    community feedback before it gets committed unless it has an explicit +1
-    from another committer
-  * any non-document patch needs to address all the comment and reach consensus
-    before it gets committed without a +1 from other committers
-  * there's no changes in the JIRA process, except as specified above
-
 What do people use Apache Bigtop for?
 ==============================
 
@@ -180,6 +156,16 @@ __On all systems, Building Apache Bigtop requires certain set of tools__
   This build task expected Puppet to be installed; user has to have sudo permissions. The task will pull down and install
   all development dependencies, frameworks and SDKs, required to build the stack on your platform.
 
+  Before executing the above command, user can use the following script to install Puppet:
+
+    sudo bigtop_toolchain/bin/puppetize.sh
+
+  Note for CentOS (and RHEL, which is not supported officially but on a best effort basis) 8 users: on these distros,
+  puppetize.sh installs the puppet command into /opt/puppetlabs/bin, which is not included usually in secure_path defined in /etc/sudoers.
+  So users may have to add that path to secure_path manually.
+  Also, RHEL 8 users may have to enable their subscriptions themselves for using EPEL.
+  cf. https://fedoraproject.org/wiki/EPEL#How_can_I_use_these_extra_packages.3F
+
   To immediately set environment after running toolchain, run
 
     . /etc/profile.d/bigtop.sh
@@ -220,32 +206,75 @@ The source for the website is located in "project_root/src/site/".
 For Developers: Building a component from Git repository
 --------------------------------------------------------
 
-To fetch source from a Git repository you need to modify `bigtop.bom` and add the
-following JSON snippets to your component/package:
+Prerequisites
+ * You will need git installed.
+ * You will need java 8 installed.
+ * You will need to use [gradlew](https://docs.gradle.org/current/userguide/gradle_wrapper.html) which is included in the source code. (Right in the root of the project folder)
+  * This project's gradlew has more documentation [here](https://cwiki.apache.org/confluence/display/BIGTOP/Quickstart+Guide%3A+Bigtop+Integration+Test+Framework+2.0)
+ * Use git to download BigTop :
+
+`git clone https://github.com/apache/bigtop.git`
+ * move into the root project folder:
+
+`cd bigtop`
+
+To fetch source from a Git repository, there're two ways to achieve this:
+a). modify `./bigtop.bom` and add JSON snippets to your component/package, or
+b). specify properties at command line
+
+* __bigtop.bom__
+
+Add following JSON snippets to the desired component/package:
 
 ```
-git     { repo = ""; ref = ""; dir = ""}
+git     { repo = ""; ref = ""; dir = ""; commit_hash = "" }
 ```
 
-* `repo` - SSH, HTTP or local path to Git repo.
-* `ref` - branch, tag or commit hash to check out.
-* `dir` - directory name to write source into.
+  * `repo` - SSH, HTTP or local path to Git repo.
+  * `ref` - branch, tag or commit hash to check out.
+  * `dir` - [OPTIONAL] directory name to write source into.
+  * `commit_hash` - [OPTIONAL] a commit hash to reset to.
 
 Some packages have different names for source directory and source tarball
 (`hbase-0.98.5-src.tar.gz` contains `hbase-0.98.5` directory).
-By default source will be fetched in a directory named by `tarball { destination = TARBALL_DST}`
+By default source will be fetched in a directory named by `tarball { source = TARBALL_SRC }`
 without `.t*` extension.
 To explicitly set directory name use the `dir` option.
+
+When `commit_hash` specified, the repo to build the package will be reset to the commit hash.
 
 Example for HBase:
 
 ```
       name    = 'hbase'
-      version { base = '1.1.9'; pkg = base; release = 1 }
+      version { base = '1.3.2'; pkg = base; release = 1 }
       git     { repo = "https://github.com/apache/hbase.git"
-                ref  = "${version.base}"
-                dir  = "${name}-${version.base}" }
+                ref  = "branch-1.3"
+                dir  = "${name}-${version.base}"
+                commit_hash = "1bedb5bfbb5a99067e7bc54718c3124f632b6e17"
+              }
 ```
+
+* __command line__
+
+
+```
+./gradlew [component]-pkg-ind -Pgit_repo="" -Pgit_ref="" -Pgit_dir="" -Pgit_commit_hash="" -Pbase_version=""
+```
+
+Where `git_repo`, `git_ref`, `git_dir`, and `git_commit_hash` are exactly the same with what we set in JSON.
+And `base_version` is to overwrite:
+```
+      version { base = ''}
+```
+
+Example for Kafka:
+
+```
+./gradlew kafka-pkg-ind -Pgit_repo=https://github.com/apache/kafka.git -Pgit_ref=trunk -Pgit_commit_hash=dc0601a1c604bea3f426ed25b6c20176ff444079 -Pbase_version=2.2.0
+```
+
+You can mix both ways to build from Git, but command line always overwrites `bigtop.bom`.
 
 
 Contact us

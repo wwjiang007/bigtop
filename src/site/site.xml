@@ -32,7 +32,7 @@
   <skin>
     <groupId>org.apache.maven.skins</groupId>
     <artifactId>maven-fluido-skin</artifactId>
-    <version>1.3.0</version>
+    <version>1.7</version>
   </skin>
 
   <custom>
@@ -65,16 +65,18 @@
 
     <menu name="Releases">
       <item name="Release Notes" href="release-notes.html"/>
-      <item name="1.1.0" href="https://www.apache.org/dyn/closer.lua/bigtop/bigtop-1.1.0/"/>
-      <item name="1.2.0" href="https://www.apache.org/dyn/closer.lua/bigtop/bigtop-1.2.0/"/>
-      <item name="1.2.1" href="https://www.apache.org/dyn/closer.lua/bigtop/bigtop-1.2.1/"/>
+      <item name="1.1.0" href="https://archive.apache.org/dist/bigtop/bigtop-1.1.0/"/>
+      <item name="1.2.0" href="https://archive.apache.org/dist/bigtop/bigtop-1.2.0/"/>
+      <item name="1.2.1" href="https://archive.apache.org/dist/bigtop/bigtop-1.2.1/"/>
+      <item name="1.3.0" href="https://archive.apache.org/dist/bigtop/bigtop-1.3.0/"/>
+      <item name="1.4.0" href="https://www.apache.org/dyn/closer.lua/bigtop/bigtop-1.4.0/"/>
     </menu>
 
     <menu name="Project Information">
       <item name="Wiki" href="https://cwiki.apache.org/confluence/display/BIGTOP" />
       <item name="JIRA" href="https://issues.apache.org/jira/browse/BIGTOP" />
-      <item name="GIT (browse)" href="https://git-wip-us.apache.org/repos/asf?p=bigtop.git" />
-      <item name="GIT (clone)" href="https://git-wip-us.apache.org/repos/asf/bigtop.git" />
+      <item name="GIT (github)" href="https://github.com/apache/bigtop" />
+      <item name="GIT (clone link)" href="https://gitbox.apache.org/repos/asf/bigtop.git" />
       <item name="Blog" href="http://blogs.apache.org/bigtop/" />
       <item name="Mailing Lists" href="mail-lists.html" />
       <item name="IRC channel" href="irc-channel.html" />

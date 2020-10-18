@@ -15,8 +15,8 @@
 
 class bigtop_toolchain::packages {
   case $operatingsystem{
-    /(?i:(centos|fedora))/: {
-      $pkgs = [
+    /(?i:(centos|fedora|redhat))/: {
+      $_pkgs = [
         "unzip",
         "rsync",
         "curl",
@@ -35,8 +35,7 @@ class bigtop_toolchain::packages {
         "fuse-devel",
         "cppunit-devel",
         "openssl-devel",
-        "python-devel",
-        "python-setuptools",
+        "python2-pip",
         "libxml2-devel",
         "libxslt-devel",
         "cyrus-sasl-devel",
@@ -62,8 +61,16 @@ class bigtop_toolchain::packages {
         "libevent-devel",
         "apr-devel",
         "bison",
-        "libffi-devel"
+        "libffi-devel",
+        "krb5-devel",
+        "net-tools",
+        "perl-Digest-SHA"
       ]
+      if ($operatingsystem == 'Fedora' or $operatingsystemmajrelease !~ /^[0-7]$/) {
+        $pkgs = concat($_pkgs, ["python2-devel", "libtirpc-devel"])
+      } else {
+        $pkgs = concat($_pkgs, "python-devel")
+      }
     }
     /(?i:(SLES|opensuse))/: { $pkgs = [
         "unzip",
@@ -87,7 +94,7 @@ class bigtop_toolchain::packages {
         "pkg-config",
         "gmp-devel",
         "python-devel",
-        "python-setuptools",
+        "python-pip",
         "libxml2-devel",
         "libxslt-devel",
         "cyrus-sasl-devel",
@@ -107,24 +114,14 @@ class bigtop_toolchain::packages {
         "libevent-devel",
         "bison",
         "flex",
-        "libffi48-devel"
+        "libffi48-devel",
+        "texlive-latex-bin-bin",
+        "libapr1",
+        "libapr1-devel"
       ]
       # fix package dependencies: BIGTOP-2120 and BIGTOP-2152 and BIGTOP-2471
-      exec { '/usr/bin/zypper -n install  --force-resolution krb5 libopenssl-devel':
+      exec { '/usr/bin/zypper -n install  --force-resolution krb5 libopenssl-devel libxml2-devel libxslt-devel boost-devel':
       } -> Package <| |>
-      # fix package libapr1
-      exec { 'suse_12.3_repo':
-        command => '/usr/bin/zypper ar --no-gpgcheck http://download.opensuse.org/distribution/12.3/repo/oss/suse/ libapr1',
-        unless => "/usr/bin/zypper lr | grep -q libapr1",
-      }
-      package { 'libapr1':
-        ensure => '1.4.6',
-        require => [Exec['suse_12.3_repo']]
-      }
-      package { 'libapr1-devel':
-        ensure => '1.4.6',
-        require => [Package['libapr1']]
-      }
     }
     /Amazon/: { $pkgs = [
       "unzip",
@@ -143,6 +140,7 @@ class bigtop_toolchain::packages {
       "lzo-devel",
       "fuse-devel",
       "openssl-devel",
+      "python27-pip",
       "rpm-build",
       "system-rpm-config",
       "fuse-libs",
@@ -157,6 +155,7 @@ class bigtop_toolchain::packages {
         "curl",
         "wget",
         "git-core",
+        "gnupg2",
         "make",
         "cmake",
         "autoconf",
@@ -166,6 +165,7 @@ class bigtop_toolchain::packages {
         "g++",
         "fuse",
         "reprepro",
+        "rsync",
         "liblzo2-dev",
         "libfuse-dev",
         "libcppunit-dev",
@@ -177,6 +177,7 @@ class bigtop_toolchain::packages {
         "devscripts",
         "build-essential",
         "dh-make",
+        "dh-python",
         "libfuse2",
         "libjansi-java",
         "python2.7-dev",
@@ -187,7 +188,6 @@ class bigtop_toolchain::packages {
         "libldap2-dev",
         "libsasl2-dev",
         "libmariadbd-dev",
-        "python-setuptools",
         "libkrb5-dev",
         "asciidoc",
         "libyaml-dev",
@@ -205,6 +205,7 @@ class bigtop_toolchain::packages {
         "bison",
         "flex",
         "python-dev",
+        "python-pip",
         "libffi-dev"
       ]
       file { '/etc/apt/apt.conf.d/01retries':
@@ -228,6 +229,43 @@ class bigtop_toolchain::packages {
   if $operatingsystem == 'CentOS' {
     package { 'epel-release':
       ensure => installed
+    }
+    # On CentOS 8, EPEL requires that the PowerTools repository is enabled.
+    # See https://fedoraproject.org/wiki/EPEL#How_can_I_use_these_extra_packages.3F
+    if $operatingsystemmajrelease !~ /^[0-7]$/ {
+      yumrepo { 'PowerTools':
+        ensure  => 'present',
+        enabled => '1'
+      }
+      Yumrepo<||> -> Package<||>
+    }
+  }
+
+
+  # BIGTOP-3364: Failed to install setuptools by pip/pip2
+  # on Ubuntu-16.04/18.04 and centos-7.
+  # From https://packaging.python.org/tutorials/installing-packages/#requirements-for-installing-packages,
+  # it suggests to leverage python3/pip3 to install setuptools.
+  #
+  # "provider => 'pip3'" is not available for puppet 3.8.5,
+  #  Workaround: Exec {pip3 install setuptools} directly insead of Package{}.
+  package { 'python3-pip':
+    ensure => installed
+  }
+
+  exec { "Setuptools Installation":
+    command => "/usr/bin/pip3 install -q --upgrade setuptools",
+  }
+
+  exec { "flake8 and whell Installation":
+    command => "/usr/bin/pip3 freeze --all; /usr/bin/pip3 --version; /usr/bin/pip3 install -q flake8 wheel",
+  }
+
+  if ($operatingsystem == 'Fedora' and versioncmp($operatingsystemmajrelease, '31') >= 0) or
+     ($osfamily == 'RedHat' and $operatingsystem != 'Fedora' and versioncmp($operatingsystemmajrelease, '8') >= 0) {
+    file { '/usr/bin/python':
+      ensure => 'link',
+      target => '/usr/bin/python2',
     }
   }
 }

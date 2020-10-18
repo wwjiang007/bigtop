@@ -34,9 +34,6 @@
 # or disabled.
 
 $roles_map = {
-  apex => {
-    client => ["apex-client"],
-  },
   hdfs-non-ha => {
     master => ["namenode"],
     worker => ["datanode"],
@@ -54,8 +51,11 @@ $roles_map = {
     # mapred is the default app which runs on yarn.
     library => ["mapred-app"],
   },
-  mapred => {
+  mapreduce => {
     library => ["mapred-app"],
+  },
+  kms => {
+    master => ["kms"],
   },
   hbase => {
     master => ["hbase-master"],
@@ -106,20 +106,11 @@ $roles_map = {
   httpfs => {
     gateway_server => ["httpfs-server"],
   },
-  hue => {
-    gateway_server => ["hue-server"],
-  },
   mahout => {
     client => ["mahout-client"],
   },
   giraph => {
     client => ["giraph-client"],
-  },
-  crunch => {
-    client => ["crunch-client"],
-  },
-  pig => {
-    client => ["pig-client"],
   },
   hive => {
     master => ["hive-server2", "hive-metastore"],
@@ -140,7 +131,7 @@ $roles_map = {
   },
   qfs => {
     master => ["qfs-metaserver"],
-    worker => ["qfs-chunkserver"],
+    worker => ["qfs-chunkserver", "qfs-client"],
     client => ["qfs-client"],
   },
   gpdb => {
@@ -153,7 +144,23 @@ $roles_map = {
   ambari => {
     master => ["ambari-server"],
     worker => ["ambari-agent"],
-  }
+  },
+  bigtop-utils => {
+    client => ["bigtop-utils"],
+  },
+  livy => {
+    master => ["livy-server"],
+  },
+  elasticsearch => {
+    master => ["elasticsearch-server"],
+    worker => ["elasticsearch-server"],
+  },
+  logstash => {
+    client => ["logstash-client"],
+  },
+  kibana => {
+    client => ["kibana-client"],
+  },
 }
 
 class hadoop_cluster_node (
@@ -200,8 +207,6 @@ class node_with_roles ($roles = hiera("bigtop::roles")) inherits hadoop_cluster_
 
   $modules = [
     "alluxio",
-    "apex",
-    "crunch",
     "flink",
     "giraph",
     "hadoop",
@@ -210,11 +215,10 @@ class node_with_roles ($roles = hiera("bigtop::roles")) inherits hadoop_cluster_
     "hadoop_flume",
     "hadoop_hive",
     "hadoop_oozie",
-    "hadoop_pig",
     "sqoop2",
     "hadoop_zookeeper",
     "hcatalog",
-    "hue",
+    "livy",
     "mahout",
     "solr",
     "spark",
@@ -226,6 +230,10 @@ class node_with_roles ($roles = hiera("bigtop::roles")) inherits hadoop_cluster_
     "kafka",
     "gpdb",
     "ambari",
+    "bigtop_utils",
+    "elasticsearch",
+    "logstash",
+    "kibana",
   ]
 
   node_with_roles::deploy_module { $modules:

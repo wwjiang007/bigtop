@@ -14,8 +14,6 @@ hadoop::hadoop_storage_dirs:
 #hadoop_cluster_node::cluster_components:
 #  - alluxio
 #  - ambari
-#  - apex
-#  - crunch
 #  - flink
 #  - flume
 #  - giraph
@@ -25,11 +23,9 @@ hadoop::hadoop_storage_dirs:
 #  - hcat
 #  - hive
 #  - httpfs
-#  - hue
 #  - mahout
 #  - mapred-app
 #  - oozie
-#  - pig
 #  - qfs
 #  - solrcloud
 #  - spark

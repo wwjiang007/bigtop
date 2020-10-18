@@ -56,6 +56,7 @@ Source6: init.d.tmpl
 Source7: spark-history-server.svc
 Source8: spark-thriftserver.svc
 Source9: bigtop.bom
+#BIGTOP_PATCH_FILES
 Requires: bigtop-utils >= 0.7, hadoop-client, hadoop-yarn
 Requires(preun): /sbin/service
 
@@ -100,7 +101,11 @@ Server for Spark worker
 %package -n spark-python
 Summary: Python client for Spark
 Group: Development/Libraries
+%if 0%{?rhel} >= 8
+Requires: spark-core = %{version}-%{release}, python2
+%else
 Requires: spark-core = %{version}-%{release}, python
+%endif
 
 %description -n spark-python
 Includes PySpark, an interactive Python shell for Spark, and related libraries
@@ -153,6 +158,8 @@ SparkR is an R package that provides a light-weight frontend to use Apache Spark
 %prep
 %setup -n %{spark_name}-%{spark_base_version}
 
+#BIGTOP_PATCH_COMMANDS
+
 %build
 bash $RPM_SOURCE_DIR/do-component-build
 
@@ -160,11 +167,19 @@ bash $RPM_SOURCE_DIR/do-component-build
 %__rm -rf $RPM_BUILD_ROOT
 %__install -d -m 0755 $RPM_BUILD_ROOT/%{initd_dir}/
 
+%if 0%{?rhel} >= 8
+PYSPARK_PYTHON=python2 bash $RPM_SOURCE_DIR/install_spark.sh \
+          --build-dir=`pwd`         \
+          --source-dir=$RPM_SOURCE_DIR \
+          --prefix=$RPM_BUILD_ROOT  \
+          --doc-dir=%{doc_spark}
+%else
 bash $RPM_SOURCE_DIR/install_spark.sh \
           --build-dir=`pwd`         \
           --source-dir=$RPM_SOURCE_DIR \
           --prefix=$RPM_BUILD_ROOT  \
           --doc-dir=%{doc_spark}
+%endif
 
 %__rm -f $RPM_BUILD_ROOT/%{lib_spark}/jars/hadoop-*.jar
 

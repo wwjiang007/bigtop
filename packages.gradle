@@ -39,7 +39,6 @@ config.bigtop.builddir = projectDir.absolutePath + "/build"
 config.bigtop.outputdir = projectDir.absolutePath + "/output"
 config.bigtop.distdir = projectDir.absolutePath + "/dist"
 config.bigtop.dldir = projectDir.absolutePath + "/dl"
-if(!config.bigtop.buildstamp) config.bigtop.buildstamp = 1
 
 def bomVersions = []
 
@@ -49,7 +48,6 @@ def final BUILD_DIR = config.bigtop.builddir
 def final OUTPUT_DIR = config.bigtop.outputdir
 def final DIST_DIR = config.bigtop.distdir
 def final DL_DIR = config.bigtop.dldir
-def final BIGTOP_BUILD_STAMP = System.getenv('BIGTOP_BUILD_STAMP') ?: config.bigtop.buildstamp
 
 // List of tasks derived from the BOM file is used to preserve the natural order
 def bomTasks = []
@@ -63,8 +61,12 @@ def touchTargetFile = { fileName ->
 def ifExists = { url ->
   if (url == null) return
   URLConnection uCon = new URL(url).openConnection()
-  return (uCon as HttpURLConnection).responseCode == 200
-}
+  try {
+    return (uCon as HttpURLConnection).responseCode == 200
+  } catch(Exception e) {
+    return false
+  }
+}    
 def safeDelete = { fileName ->
   exec {
     workingDir '.'
@@ -175,13 +177,15 @@ def genTasks = { target ->
       description: "Download $target artifacts",
       group: PACKAGES_GROUP) doLast {
 
+    def final TARBALL_SRC = config.bigtop.components[target].tarball.source
     def final TARBALL_DST = config.bigtop.components[target].tarball.destination
     def final DOWNLOAD_DST = config.bigtop.components[target].downloaddst
     def final DOWNLOAD_URL = config.bigtop.components[target].downloadurl
 
-    def final GIT_REPO = config.bigtop.components[target].git.repo
-    def final GIT_REF = config.bigtop.components[target].git.ref
-    def final GIT_DIR = config.bigtop.components[target].git.dir
+    def final GIT_REPO = project.hasProperty('git_repo') ? project.property('git_repo') : config.bigtop.components[target].git.repo
+    def final GIT_REF = project.hasProperty('git_ref') ? project.property('git_ref') : config.bigtop.components[target].git.ref
+    def final GIT_DIR = project.hasProperty('git_dir') ? project.property('git_dir') : config.bigtop.components[target].git.dir
+    def final GIT_COMMIT_HASH = project.hasProperty('git_commit_hash') ? project.property('git_commit_hash') : config.bigtop.components[target].git.commit_hash
     def final GIT_USER_NAME = config.bigtop.components[target].git.user ?: config.bigtop.git.user
     def final GIT_ACCESS_TOKEN = config.bigtop.components[target].git.token ?: config.bigtop.git.token
 
@@ -196,9 +200,13 @@ def genTasks = { target ->
     if (GIT_REPO && GIT_REF) {
       def dir = GIT_DIR
       if (dir == null || dir.isEmpty()) {
-        dir = TARBALL_DST.substring(0, TARBALL_DST.lastIndexOf(".t"))
+        dir = TARBALL_SRC.substring(0, TARBALL_SRC.lastIndexOf(".t"))
       }
       delete("${DL_DIR}/${dir}")
+      def depth = "--depth 1"
+      if ( GIT_COMMIT_HASH ) {
+        depth = ""
+      }
       if (GIT_USER_NAME && GIT_ACCESS_TOKEN) {
         def uri = new URI(GIT_REPO)
         if (!GIT_REPO.toLowerCase().startsWith("http")) {
@@ -211,14 +219,14 @@ def genTasks = { target ->
          uri.getFragment())
         exec {
           workingDir DL_DIR
-          commandLine "git clone --depth 1 --branch $GIT_REF ${uri} ${dir}".split()
+          commandLine "git clone ${depth} --branch $GIT_REF ${uri} ${dir}".split()
           errorOutput devNull
           standardOutput devNull
         }
       } else {
         exec {
           workingDir DL_DIR
-          commandLine "git clone --depth 1 --branch $GIT_REF ${GIT_REPO} ${dir}".split()
+          commandLine "git clone ${depth} --branch $GIT_REF ${GIT_REPO} ${dir}".split()
           errorOutput devNull
           standardOutput devNull
         }
@@ -228,6 +236,14 @@ def genTasks = { target ->
         commandLine "git submodule update --init".split()
         errorOutput devNull
         standardOutput devNull
+      }
+      if ( GIT_COMMIT_HASH ) {
+        exec {
+          workingDir "$DL_DIR/${dir}"
+          commandLine "git reset $GIT_COMMIT_HASH --hard".split()
+          errorOutput devNull
+          standardOutput devNull
+        }
       }
       delete("${DL_DIR}/${dir}/.git")
       exec {
@@ -308,6 +324,8 @@ def genTasks = { target ->
       println "\tNothing to do. Exiting..."
       return
     }
+    def final BIGTOP_BUILD_STAMP = System.getenv('BIGTOP_BUILD_STAMP') ?:
+            config.bigtop.components[target].version.release
     def final PKG_NAME = config.bigtop.components[target].pkg
     def final PKG_VERSION = config.bigtop.components[target].version.pkg
     def final PKG_OUTPUT_DIR = config.bigtop.components[target].outputdir
@@ -360,6 +378,8 @@ def genTasks = { target ->
       println "\tNothing to do. Exiting..."
       return
     }
+     def final BIGTOP_BUILD_STAMP = System.getenv('BIGTOP_BUILD_STAMP') ?:
+             config.bigtop.components[target].version.release
     def final TARBALL_SRC = config.bigtop.components[target].tarball.source
     def final TARBALL_DST = config.bigtop.components[target].tarball.destination ?: TARBALL_SRC
     def final PKG_BUILD_DIR = config.bigtop.components[target].builddir
@@ -381,16 +401,30 @@ def genTasks = { target ->
       workingDir DEB_BLD_DIR
       commandLine "tar --strip-components 1 -xf $DEB_BLD_DIR/../${PKG_NAME}_${PKG_VERSION}.orig.tar.gz".split(' ')
     }
-    fileTree ("${BASE_DIR}/bigtop-packages/src/deb/$NAME") {
-      include '**/*'
-    }.copy { into "$DEB_BLD_DIR/debian" }
+    copy {
+      from fileTree("${BASE_DIR}/bigtop-packages/src/deb/$NAME") {
+        include '**/*'
+      }
+      into "$DEB_BLD_DIR/debian"
+    }
     copy {
       from "${BASE_DIR}/bigtop-packages/src/templates/init.d.tmpl"
       into "$DEB_BLD_DIR/debian"
     }
-    fileTree ("$BASE_DIR/bigtop-packages/src/common/$NAME") {
-      include '**/*'
-    }.copy { into "$DEB_BLD_DIR/debian" }
+    copy {
+      from "${BASE_DIR}/bigtop-packages/src/scripts"
+      into "$DEB_BLD_DIR/debian"
+    }
+    copy {
+      from "${BASE_DIR}/bigtop-packages/src/extensions"
+      into "$DEB_BLD_DIR/debian"
+    }
+    copy {
+      from fileTree("$BASE_DIR/bigtop-packages/src/common/$NAME") {
+        include '**/*'
+      }
+      into "$DEB_BLD_DIR/debian"
+    }
     // Prepeare bom file with all the versions
     def bomWriter = new File("$DEB_BLD_DIR/debian/bigtop.bom").newWriter()
     bomVersions.each { bomWriter << "$it\n"}
@@ -414,14 +448,15 @@ def genTasks = { target ->
       seriesWriter.close()
     }
     // Deleting obsolete files
-    delete fileTree (dir: "$DEB_BLD_DIR/debian", includes: ['*.ex', '*.EX', '*.~'])
+    delete fileTree(dir: "$DEB_BLD_DIR/debian", includes: ['*.ex', '*.EX', '*.~'])
     // Creating source package
     exec {
       workingDir DEB_BLD_DIR
       commandLine "dpkg-buildpackage -uc -us -sa -S".split(' ')
     }
     mkdir(PKG_OUTPUT_DIR)
-    fileTree (dir: "$DEB_PKG_DIR/..", includes: ['*.dsc', '*.diff.gz', '*.debian.tar.gz', '*.debian.tar.xz', "*_source.changes", "*.orig.tar.gz" ]).copy {
+    copy {
+      from fileTree(dir: "$DEB_PKG_DIR/..", includes: ['*.dsc', '*.diff.gz', '*.debian.tar.gz', '*.debian.tar.xz', "*_source.changes", "*.orig.tar.gz" ])
       into PKG_OUTPUT_DIR
     }
     safeDelete(DEB_BLD_DIR)
@@ -436,6 +471,8 @@ def genTasks = { target ->
       println "\tNothing to do. Exiting..."
       return
     }
+    def final BIGTOP_BUILD_STAMP = System.getenv('BIGTOP_BUILD_STAMP') ?:
+            config.bigtop.components[target].version.release
     def final PKG_BUILD_DIR = config.bigtop.components[target].builddir
     def final NAME = config.bigtop.components[target].name
     def final PKG_NAME = config.bigtop.components[target].pkg
@@ -446,6 +483,11 @@ def genTasks = { target ->
     def RELEASE_DIST = "rpmbuild --eval '%{?dist}' 2>/dev/null".execute().text.trim().replaceAll("'",'')
     def SRCRPM="$PKG_OUTPUT_DIR/$PKG_NAME-${PKG_VERSION}-$BIGTOP_BUILD_STAMP${RELEASE_DIST}.src.rpm"
 
+    def final DO_MAVEN_DEPLOY = project.findProperty('doMavenDeploy') == 'true'
+    def final MAVEN_DEPLOY_SOURCE = project.findProperty('mavenDeploySource') == 'true'
+    def final MAVEN_REPO_ID = project.hasProperty('mavenRepoId') ? project.property('mavenRepoId') : 'default'
+    def final MAVEN_REPO_URI = project.hasProperty('mavenRepoUri') ? project.property('mavenRepoUri') : null
+
     def command = [
         '--define', "_topdir $PKG_BUILD_DIR/rpm/",
         '--define', "${NAME}_base_version $BASE_VERSION",
@@ -453,15 +495,26 @@ def genTasks = { target ->
         '--define', "${NAME}_version ${PKG_VERSION}",
         '--define', "${NAME}_release ${BIGTOP_BUILD_STAMP}%{?dist}",
         '--rebuild', SRCRPM,
+        '--define', "do_maven_deploy ${DO_MAVEN_DEPLOY}",
+        '--define', "maven_deploy_source ${MAVEN_DEPLOY_SOURCE}"
     ]
+
+   if (MAVEN_REPO_URI != null) {
+      command.addAll('--define', "maven_repo_uri ${MAVEN_REPO_URI}")
+      command.addAll('--define', "maven_repo_id ${MAVEN_REPO_ID}")
+    }
+
     exec {
       workingDir BASE_DIR
       executable 'rpmbuild'
       args command
     }
-    fileTree ("$PKG_BUILD_DIR/rpm/RPMS") {
-      include '**/*'
-    }.copy { into PKG_OUTPUT_DIR }
+    copy {
+      from fileTree("$PKG_BUILD_DIR/rpm/RPMS") {
+        include '**/*'
+      }
+      into PKG_OUTPUT_DIR
+    }
     touchTargetFile(config.bigtop.components[target].targetrpm)
   }
   // Guarantee that tasks are ran in the order set by BOM file dependencies section
@@ -480,6 +533,8 @@ def genTasks = { target ->
       println "\tNothing to do. Exiting..."
       return
     }
+    def final BIGTOP_BUILD_STAMP = System.getenv('BIGTOP_BUILD_STAMP') ?:
+            config.bigtop.components[target].version.release
     def final NAME = config.bigtop.components[target].name
     def final PKG_NAME = config.bigtop.components[target].pkg
     def final PKG_NAME_FOR_PKG = NAME.replaceAll("-", "_")
@@ -492,9 +547,12 @@ def genTasks = { target ->
     ['INSTALL','SOURCES','BUILD','SRPMS','RPMS'].each { rpmdir ->
       mkdir("$PKG_BUILD_DIR/rpm/$rpmdir")
     }
-    fileTree ("${BASE_DIR}/bigtop-packages/src/rpm/$NAME") {
-      include '**/*'
-    }.copy { into "$PKG_BUILD_DIR/rpm" }
+    copy {
+      from fileTree("${BASE_DIR}/bigtop-packages/src/rpm/$NAME") {
+        include '**/*'
+      }
+      into "$PKG_BUILD_DIR/rpm"
+    }
     copy {
       from SEED_TAR
       into "$PKG_BUILD_DIR/rpm/SOURCES"
@@ -503,9 +561,22 @@ def genTasks = { target ->
       from "${BASE_DIR}/bigtop-packages/src/templates/init.d.tmpl"
       into "$PKG_BUILD_DIR/rpm/SOURCES"
     }
-    fileTree ("$BASE_DIR/bigtop-packages/src/common/$NAME") {
-      include '**/*'
-    }.copy { into "$PKG_BUILD_DIR/rpm/SOURCES" }
+    copy {
+      from "${BASE_DIR}/bigtop-packages/src/extensions"
+      into "$PKG_BUILD_DIR/rpm/SOURCES"
+      include "*"
+    }
+    copy {
+      from "${BASE_DIR}/bigtop-packages/src/scripts"
+      into "$PKG_BUILD_DIR/rpm/SOURCES"
+      include "*"
+    }
+    copy {
+      from fileTree("$BASE_DIR/bigtop-packages/src/common/$NAME") {
+        include '**/*'
+      }
+      into "$PKG_BUILD_DIR/rpm/SOURCES"
+    }
     // Writing bigtop.bom files with all the versions
     def bomWriter = new File("$PKG_BUILD_DIR/rpm/SOURCES/bigtop.bom").newWriter()
     bomVersions.each { bomWriter << "$it\n"}
@@ -573,17 +644,31 @@ def genTasks = { target ->
   }
   task "$target-pkg-ind" (
           description: "Invoking a native binary packaging for $target in Docker. Usage: \$ ./gradlew " +
-                  "-POS=[centos-7|fedora-26|debian-9|ubuntu-16.04|opensuse-42.3] " +
-                  "-Pprefix=[trunk|1.2.1|1.2.0|1.1.0|...] $target-pkg-ind",
+                  "-POS=[centos-7|fedora-31|debian-9|ubuntu-16.04] " +
+                  "-Pprefix=[trunk|1.4.0|1.3.0|1.2.1|...] $target-pkg-ind " +
+                  "-Pnexus=[true|false]",
           group: PACKAGES_GROUP) doLast {
     def _prefix = project.hasProperty("prefix") ? prefix : "trunk"
     def _OS = project.hasProperty("OS") ? OS : "centos-7"
     def _target_pkg = "$target-pkg"
+    def _docker_run_option = project.hasProperty("docker-run-option") ? this.'docker-run-option' : ""
+    def additionalConfigKeys = ['git_repo', 'git_ref', 'git_dir', 'git_commit_hash', 'base_version']
+    additionalConfigKeys.each { key ->
+      if (project.hasProperty(key)) {
+        _target_pkg += " -P${key}=" + project.property(key)
+      }
+    }
     def command = [
+            'bash', '-x',
             './bigtop-ci/build.sh',
-            '--os', _prefix + '-' + _OS,
-            '--target', _target_pkg
+            '--prefix', _prefix,
+            '--os', _OS,
+            '--target', _target_pkg,
+            '--docker-run-option', _docker_run_option,
     ]
+    if ( project.hasProperty("nexus") ) {
+      command.add('--nexus')
+    }
 
     println "Building $_prefix $_target_pkg on $_OS in Docker...\n"
 
@@ -596,6 +681,19 @@ def genTasks = { target ->
     println "Base: ${config.bigtop.components[target].version.base}"
   }
   task "${target}_vardefines" doLast {
+    if (project.hasProperty('base_version')) {
+      def BASE_VERSION = project.property("base_version")
+      if (config.bigtop.components[target].tarball.source) {
+        config.bigtop.components[target].tarball.source = config.bigtop.components[target].tarball.source
+                .replaceAll(config.bigtop.components[target].version.base, BASE_VERSION)
+      }
+      config.bigtop.components[target].tarball.destination = config.bigtop.components[target].tarball.destination
+              .replaceAll(config.bigtop.components[target].version.base, BASE_VERSION)
+
+      config.bigtop.components[target].version.base = BASE_VERSION
+      config.bigtop.components[target].version.pkg = BASE_VERSION
+    }
+
     setDefaults(config.bigtop.components[target])
 
     config.bigtop.components[target].package.release = '1'
@@ -708,6 +806,10 @@ project.afterEvaluate {
       description: "Build all native packages for the stack components",
       group: PACKAGES_GROUP
   ) doLast { }
+  task "pkgs-ind" (dependsOn: tasks.findAll { alltask -> alltask.name.endsWith("-pkg-ind")}*.name,
+          description: "Build all native packages for the stack components inside Docker",
+          group: PACKAGES_GROUP
+  ) doLast { }
 
   task allclean (dependsOn: [clean, tasks.findAll { alltask -> alltask.name.endsWith("-clean")}*.name],
       description: "Removing $BUILD_DIR, $OUTPUT_DIR, and $DIST_DIR.\n\t\t" +
@@ -757,4 +859,26 @@ if (nativePackaging) {
   task "repo" (dependsOn: nativePackaging.repo,
       description: "Invoking a native repository target ${nativePackaging.repo}",
       group: PACKAGES_GROUP) doLast { }
+}
+
+task "repo-ind" (
+    description: "Invoking a native repository in Docker. Usage: \$ ./gradlew " +
+            "-POS=[centos-7|fedora-31|debian-9|ubuntu-16.04] " +
+            "-Pprefix=[trunk|1.4.0|1.3.0|1.2.1|...] repo-ind",
+    group: PACKAGES_GROUP) doLast {
+  def _prefix = project.hasProperty("prefix") ? prefix : "trunk"
+  def _OS = project.hasProperty("OS") ? OS : "centos-7"
+  def _docker_run_option = project.hasProperty("docker-run-option") ? this.'docker-run-option' : ""
+  def command = [
+      'bash', '-x',
+      './bigtop-ci/build.sh',
+      '--prefix', _prefix,
+      '--os', _OS,
+      '--target', 'repo',
+      '--docker-run-option', _docker_run_option
+  ]
+  exec {
+    workingDir BASE_DIR
+    commandLine command
+  }
 }

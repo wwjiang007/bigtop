@@ -19,8 +19,108 @@ from charmhelpers.core import hookenv
 from charms.layer.apache_bigtop_base import get_package_version
 from charms.layer.bigtop_zookeeper import Zookeeper
 from charms.leadership import leader_set, leader_get
-from charms.reactive import set_state, when, when_not, is_state
+from charms.reactive import (
+    hook,
+    is_state,
+    remove_state,
+    set_state,
+    when,
+    when_not
+)
 from charms.reactive.helpers import data_changed
+import shutil
+import os
+
+
+@when('local-monitors.available')
+def local_monitors_available(nagios):
+    setup_nagios(nagios)
+
+
+@when('nrpe-external-master.available')
+def nrpe_external_master_available(nagios):
+    setup_nagios(nagios)
+
+
+def setup_nagios(nagios):
+    config = hookenv.config()
+    unit_name = hookenv.local_unit()
+    checks = [
+        {
+            'name': 'zk_open_file_descriptor_coun',
+            'description': 'ZK_Open_File_Descriptors_Count',
+            'warn': config['open_file_descriptor_count_warn'],
+            'crit': config['open_file_descriptor_count_crit']
+        },
+        {
+            'name': 'zk_ephemerals_count',
+            'description': 'ZK_Ephemerals_Count',
+            'warn': config['ephemerals_count_warn'],
+            'crit': config['ephemerals_count_crit']
+        },
+        {
+            'name': 'zk_avg_latency',
+            'description': 'ZK_Avg_Latency',
+            'warn': config['avg_latency_warn'],
+            'crit': config['avg_latency_crit']
+        },
+        {
+            'name': 'zk_max_latency',
+            'description': 'ZK_Max_Latency',
+            'warn': config['max_latency_warn'],
+            'crit': config['max_latency_crit']
+        },
+        {
+            'name': 'zk_min_latency',
+            'description': 'ZK_Min_Latency',
+            'warn': config['min_latency_warn'],
+            'crit': config['min_latency_crit']
+        },
+        {
+            'name': 'zk_outstanding_requests',
+            'description': 'ZK_Outstanding_Requests',
+            'warn': config['outstanding_requests_warn'],
+            'crit': config['outstanding_requests_crit']
+        },
+        {
+            'name': 'zk_watch_count',
+            'description': 'ZK_Watch_Count',
+            'warn': config['watch_count_warn'],
+            'crit': config['watch_count_crit']
+        },
+    ]
+    check_cmd = ['/usr/local/lib/nagios/plugins/check_zookeeper.py',
+                 '-o', 'nagios', '-s', 'localhost:2181']
+    for check in checks:
+        nagios.add_check(check_cmd + ['--key', check['name'],
+                                      '-w', str(check['warn']),
+                                      '-c', str(check['crit'])],
+                         name=check['name'],
+                         description=check['description'],
+                         context=config["nagios_context"],
+                         servicegroups=config["nagios_servicegroups"],
+                         unit=unit_name
+                         )
+    nagios.updated()
+
+
+@hook('upgrade-charm')
+def nrpe_helper_upgrade_charm():
+    # Make sure the nrpe handler will get replaced at charm upgrade
+    remove_state('zookeeper.nrpe_helper.installed')
+
+
+@when('zookeeper.nrpe_helper.registered')
+@when_not('zookeeper.nrpe_helper.installed')
+def install_nrpe_helper():
+    dst_dir = '/usr/local/lib/nagios/plugins/'
+    if not os.path.exists(dst_dir):
+        os.makedirs(dst_dir)
+    src = '{}/files/check_zookeeper.py'.format(hookenv.charm_dir())
+    dst = '{}/check_zookeeper.py'.format(dst_dir)
+    shutil.copy(src, dst)
+    os.chmod(dst, 0o755)
+    set_state('zookeeper.nrpe_helper.installed')
 
 
 @when('bigtop.available')
@@ -40,6 +140,12 @@ def install_zookeeper():
     data_changed(
         'zk.network_interface',
         hookenv.config().get('network_interface'))
+    data_changed(
+        'zk.autopurge_purge_interval',
+        hookenv.config().get('autopurge_purge_interval'))
+    data_changed(
+        'zk.autopurge_snap_retain_count',
+        hookenv.config().get('autopurge_snap_retain_count'))
     zookeeper.install()
     zookeeper.open_ports()
     set_state('zookeeper.installed')
@@ -71,6 +177,20 @@ def update_network_interface():
     network_interface = hookenv.config().get('network_interface')
     if data_changed('zk.network_interface', network_interface):
         _restart_zookeeper('updating network interface')
+
+
+@when('zookeeper.started')
+def update_autopurge_purge_interval():
+    purge_interval = hookenv.config().get('autopurge_purge_interval')
+    if data_changed('zk.autopurge_purge_interval', purge_interval):
+        _restart_zookeeper('updating snapshot purge interval')
+
+
+@when('zookeeper.started')
+def update_autopurge_snap_retain_count():
+    snap_retain = hookenv.config().get('autopurge_snap_retain_count')
+    if data_changed('zk.autopurge_snap_retain_count', snap_retain):
+        _restart_zookeeper('updating number of retained snapshots')
 
 
 @when('zookeeper.started', 'zookeeper.joined')
@@ -194,6 +314,12 @@ def check_cluster_departed(zkpeer, zkpeer_departed):
 
     '''
     check_cluster(zkpeer)
+
+
+@when('zookeeper.started', 'leadership.is_leader', 'zkpeer.changed')
+def check_cluster_changed(zkpeer):
+    check_cluster(zkpeer)
+    zkpeer.dismiss_changed()
 
 
 @when('leadership.changed.restart_queue', 'zkpeer.joined')

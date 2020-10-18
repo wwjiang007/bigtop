@@ -21,21 +21,21 @@ class alluxio {
     }
   }
 
-  class common ($master_host){
+  class common ($master_host,
+      $alluxio_underfs_address = hiera('bigtop::hadoop_namenode_uri'),
+  ) {
     package { "alluxio":
       ensure => latest,
     }
 
-    # add logging into /var/log/..
-    file {
-        "/etc/alluxio/conf/log4j.properties":
-        content => template("alluxio/log4j.properties"),
-        require => [Package["alluxio"]]
+    exec { "daemon-reload":
+      path => ["/bin", "/usr/bin"],
+      command => "systemctl daemon-reload",
+      require => [ Package["alluxio"] ]
     }
 
-    # add alluxio-env.sh to point to alluxio master
-    file { "/etc/alluxio/conf/alluxio-env.sh":
-        content => template("alluxio/alluxio-env.sh"),
+    file { "/etc/alluxio/conf/alluxio-site.properties":
+        content => template("alluxio/alluxio-site.properties"),
         require => [Package["alluxio"]]
     }
   }
@@ -43,16 +43,17 @@ class alluxio {
   class master {
     include alluxio::common
 
-   exec {
+    exec {
         "alluxio formatting":
            command => "/usr/lib/alluxio/bin/alluxio format",
-           require => [ Package["alluxio"], File["/etc/alluxio/conf/log4j.properties"], File["/etc/alluxio/conf/alluxio-env.sh"] ]
+           require => [ Package["alluxio"], File["/etc/alluxio/conf/alluxio-site.properties"] ]
     }
 
     if ( $fqdn == $alluxio::common::master_host ) {
       service { "alluxio-master":
         ensure => running,
-        require => [ Package["alluxio"], Exec["alluxio formatting"] ],
+        require => [ Package["alluxio"], Exec["daemon-reload"], Exec["alluxio formatting"] ],
+        subscribe => File["/etc/alluxio/conf/alluxio-site.properties"],
         hasrestart => true,
         hasstatus => true,
       }
@@ -63,15 +64,16 @@ class alluxio {
   class worker {
     include alluxio::common
 
-   if ( $fqdn == $alluxio::common::master_host ) {
-      notice("alluxio ---> master host")
-      # We want master to run first in all cases
-      Service["alluxio-master"] ~> Service["alluxio-worker"]
-   }
+    if ( $fqdn == $alluxio::common::master_host ) {
+       notice("alluxio ---> master host")
+       # We want master to run first in all cases
+       Service["alluxio-master"] ~> Service["alluxio-worker"]
+    }
 
     service { "alluxio-worker":
       ensure => running,
-      require => [ Package["alluxio"], File["/etc/alluxio/conf/log4j.properties"], File["/etc/alluxio/conf/alluxio-env.sh"] ],
+      require => [ Package["alluxio"], Exec["daemon-reload"], File["/etc/alluxio/conf/alluxio-site.properties"] ],
+      subscribe => File["/etc/alluxio/conf/alluxio-site.properties"],
       hasrestart => true,
       hasstatus => true,
     }

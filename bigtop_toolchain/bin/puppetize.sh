@@ -21,26 +21,58 @@ if [ -f /etc/os-release ]; then
 fi
 
 case ${ID}-${VERSION_ID} in
-    fedora-26)
-      dnf -y install yum-utils
-      dnf -y check-update
-      dnf -y install hostname findutils curl sudo unzip wget puppet puppetlabs-stdlib
+    fedora-31)
+        dnf -y install yum-utils
+        dnf -y check-update
+        dnf -y install hostname diffutils findutils curl sudo unzip wget puppet procps-ng libxcrypt-compat
+        # On Fedora 31, the puppetlabs-stdlib package provided by the distro installs the module
+        # into /usr/share/puppet/modules, but it's not recognized as the default module path.
+        # So we install that module in the same way as CentOS 7.
+        puppet module install puppetlabs-stdlib --version 4.12.0
         ;;
     ubuntu-16.04)
         apt-get update
         apt-get -y install wget curl sudo unzip puppet software-properties-common puppet-module-puppetlabs-apt puppet-module-puppetlabs-stdlib
         ;;
+    ubuntu-18.04)
+        apt-get update
+        apt-get -y install wget curl sudo unzip puppet software-properties-common puppet-module-puppetlabs-apt puppet-module-puppetlabs-stdlib systemd-sysv
+        ;;
     debian-9*)
         apt-get update
-        apt-get -y install wget curl sudo unzip puppet puppet-module-puppetlabs-apt puppet-module-puppetlabs-stdlib
-         ;;
-    opensuse-42.3)
-        zypper --gpg-auto-import-keys install -y curl sudo unzip wget puppet suse-release ca-certificates-mozilla net-tools tar
-        puppet module install puppetlabs-stdlib
+        apt-get -y install wget curl sudo unzip puppet puppet-module-puppetlabs-apt puppet-module-puppetlabs-stdlib systemd-sysv
+        ;;
+    debian-10*)
+        apt-get update
+        apt-get -y install wget curl sudo unzip puppet puppet-module-puppetlabs-apt puppet-module-puppetlabs-stdlib systemd-sysv gnupg procps
         ;;
     centos-7*)
         rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-        yum -y install hostname curl sudo unzip wget puppet puppetlabs-stdlib
+        yum updateinfo
+        # BIGTOP-3088: pin puppetlabs-stdlib to 4.12.0 as the one provided by
+        # distro (4.25.0) has conflict with puppet<4. Should be removed once
+        # puppet in distro is updated.
+        yum -y install hostname curl sudo unzip wget puppet
+        puppet module install puppetlabs-stdlib --version 4.12.0
+        ;;
+    centos-8*)
+        rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+        dnf -y check-update
+        dnf -y install hostname diffutils curl sudo unzip wget puppet 'dnf-command(config-manager)'
+        # Install the module in the same way as Fedora 31 and CentOS 7 for compatibility issues.
+        puppet module install puppetlabs-stdlib --version 4.12.0
+        # Enabling the PowerTools and EPEL repositories via Puppet doesn't seem to work in some cases.
+        # As a workaround for that, enable the former here in advance of running the Puppet manifests.
+        dnf config-manager --set-enabled PowerTools
+        ;;
+    rhel-8*)
+        rpm -Uvh https://yum.puppet.com/puppet5-release-el-8.noarch.rpm
+        dnf -y check-update
+        dnf -y install hostname diffutils curl sudo unzip wget puppet-agent 'dnf-command(config-manager)'
+        puppet module install puppetlabs-stdlib
+        # Enabling the CodeReady repositories via Puppet doesn't seem to work in some cases.
+        # As a workaround for that, enable the former here in advance of running the Puppet manifests.
+        dnf config-manager --set-enabled codeready-builder-for-rhel-8-rhui-rpms
         ;;
     *)
         echo "Unsupported OS ${ID}-${VERSION_ID}."

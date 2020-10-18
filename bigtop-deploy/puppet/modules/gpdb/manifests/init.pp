@@ -64,6 +64,7 @@ class gpdb {
 
     class { 'gpdb::common::stop_master_in_admin_mode':
       base_dir      => "$db_base_dir",
+      nodes         => $nodes,
       gp_home       => $gp_home,
       master_port   => $master_db_port,
       require       => Class['gpdb::common::configure_master_node']
@@ -75,7 +76,7 @@ class gpdb {
       db_base_dir             => $gpdb::common::db_base_dir,
       master_db_port          => $gpdb::common::master_db_port,
       segment_db_port_prefix  => $gpdb::common::segment_db_port_prefix,
-      require                 => Class['gpdb::common::stop_master_in_admin_mode'],
+      require                 => [ Gpdb::Server["stop_if_running"], Class['gpdb::common::stop_master_in_admin_mode'] ],
       start_or_stop           => running,
     }
 
@@ -94,41 +95,63 @@ class gpdb {
 
     class install_packages{
       case $operatingsystem{
-        /(?i:(centos|fedora))/: {
+        /(?i:(centos|fedora|redhat))/: {
+          if ($operatingsystem != 'Fedora') {
+            if (versioncmp($operatingsystemmajrelease, '8') < 0) {
+              $base_url = 'http://download.fedoraproject.org/pub/epel/$releasever/$basearch'
+              $python_devel = 'python-devel'
+            } else {
+              $base_url = 'http://download.fedoraproject.org/pub/epel/$releasever/Everything/$basearch'
+              $python_devel = 'python2-devel'
+            }
+          } else {
+            # Looks like it works, at least with Fedora 31
+            $base_url = 'http://download.fedoraproject.org/pub/epel/7/$basearch'
+            $python_devel = 'python2-devel'
+          }
           yumrepo { "epel":
-            baseurl  => "http://download.fedoraproject.org/pub/epel/7/\$basearch",
+            baseurl  => $base_url,
             descr    => "epel packages",
             enabled  => 1,
             gpgcheck => 0,
           }
+          package { [$python_devel]:
+            ensure => latest,
+          }
           package { ["libffi-devel"]:
             ensure => latest,
           }
-          package { ["python-lockfile"]:
+          package { ["python2-lockfile"]:
             ensure => latest,
           }
-          package { ["psutil"]:
+          package { ["gcc"]:
+            ensure => latest,
+          }
+          package { ["python2-psutil"]:
             ensure   => latest,
-            provider => pip,
-            require  => Package["python-pip"],
           }
           package { ["paramiko"]:
             ensure   => latest,
             provider => pip,
-            require  => Package["python-pip"],
+            require  => File["/usr/bin/pip-python"],
           }
-          package { ["python-pip"]:
+          package { ["python2-pip"]:
             ensure  => latest,
             require => [
               Yumrepo["epel"],
               Package["libffi-devel"],
-              Package["python-lockfile"],
+              Package["python2-lockfile"],
             ],
+          }
+	  file { '/usr/bin/pip-python':
+            ensure  => 'link',
+	    require => Package["python2-pip"],
+            target  => '/usr/bin/pip',
           }
         }
         /(?i:(SLES|opensuse))/: {
         }
-        Amazon: { }
+        /(Amazon)/: { }
         /(Ubuntu|Debian)/: {
           package { ["libffi-dev"]:
             ensure => latest,
@@ -274,15 +297,17 @@ class gpdb {
       }
     }
 
-    class stop_master_in_admin_mode($base_dir = undef, $gp_home = undef, $master_port = undef){
-      exec { 'stop-master-db-in-admin-mode':
-        command => "stop-db.sh $base_dir/master/gpseg-1 $master_port",
-        path    => '/home/gpadmin',
-        user    => 'gpadmin',
-        require => [
-          Exec["create_master_db$base_dir/master/gpseg-1"],
-          File['/home/gpadmin/stop-db.sh']
-        ],
+    class stop_master_in_admin_mode($nodes = undef, $base_dir = undef, $gp_home = undef, $master_port = undef){
+      if ($::fqdn == $nodes[0]) {
+        exec { 'stop-master-db-in-admin-mode':
+          command => "stop-db.sh $base_dir/master/gpseg-1 $master_port",
+          path    => '/home/gpadmin',
+          user    => 'gpadmin',
+          require => [
+            Exec["create_master_db$base_dir/master/gpseg-1"],
+            File['/home/gpadmin/stop-db.sh']
+          ],
+        }
       }
     }
 

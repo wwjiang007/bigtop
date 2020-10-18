@@ -47,6 +47,9 @@ override_dh_auto_build:
 		--qfs-version=$(QFS_BASE_VERSION) \
 		--python=$(PYTHON_PATH)
 
+override_dh_auto_test:
+	@echo Tests are disabled
+
 override_dh_auto_install:
 	bash -x debian/install_qfs.sh \
 		--source-dir=debian \
@@ -76,3 +79,6 @@ override_dh_fixperms:
 	# upstream qfs has executable gifs -- later version fixes but hasn't been
 	# released yet
 	chmod -c a-x debian/qfs-webui/usr/share/qfs/webui/files/sorttable/*.gif
+
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym

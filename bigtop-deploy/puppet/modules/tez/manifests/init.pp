@@ -26,5 +26,9 @@ class tez {
     package { "tez":
       ensure => latest,
     }
+    file { "/etc/environment":
+      content => template("tez/environment"),
+      require => Package["tez"],
+    }
   }
 }
